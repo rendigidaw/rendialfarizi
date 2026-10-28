@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rooftop Run</title>
+<style>
+:root{--ink:#14202b;--panel:rgba(255,255,255,.88);--acc:#e0182b;--sky:#cfe8ff;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#eef3f8;--panel:rgba(16,22,30,.88);--acc:#ff5a68}}
+:root[data-theme="dark"]{--ink:#eef3f8;--panel:rgba(16,22,30,.88);--acc:#ff5a68}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{height:100%;margin:0;overflow:hidden;background:var(--sky);color:var(--ink);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+.p{position:fixed;background:var(--panel);color:var(--ink);border-radius:10px;padding:10px 14px;box-shadow:0 2px 10px rgba(0,0,0,.2)}
+#mis{left:12px;top:calc(12px + env(safe-area-inset-top,0px));max-width:270px}
+#mis b{font-size:15px}#mo{font-weight:700;color:var(--acc);margin-top:4px}
+#nav{left:50%;top:calc(12px + env(safe-area-inset-top,0px));transform:translateX(-50%);text-align:center;min-width:84px}
+#ar{font-size:26px;line-height:1;color:var(--acc);display:inline-block}
+#help{right:12px;top:calc(12px + env(safe-area-inset-top,0px));font-size:12px;max-width:230px}
+#sb{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);width:180px;height:10px;border-radius:6px;background:var(--panel);overflow:hidden}
+#sf{display:block;height:100%;width:100%;background:var(--acc)}
+#toast{left:50%;top:26%;transform:translateX(-50%);font-size:clamp(20px,4.5vw,34px);font-weight:800;text-align:center;opacity:0;transition:opacity .25s;pointer-events:none;width:max-content;max-width:90vw}
+#start{left:50%;top:50%;transform:translate(-50%,-50%);width:min(90vw,480px);text-align:center;cursor:pointer}
+#start h1{margin:0 0 6px;font-size:30px}
+kbd{border:1px solid currentColor;border-radius:4px;padding:0 5px;font-size:12px}
+body:not(.on) #mis,body:not(.on) #nav,body:not(.on) #sb,body:not(.on) #help{display:none}
+</style></head><body>
+<div id="mis" class="p"><b id="mn"></b><div id="mt"></div><div id="mo"></div><div id="tm"></div></div>
+<div id="nav" class="p"><span id="ar">▲</span><div id="di"></div></div>
+<div id="help" class="p"><kbd>WASD</kbd> move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump, again in air to double jump · hold <kbd>Space</kbd> and push into a wall to climb · drag mouse or <kbd>←</kbd><kbd>→</kbd> to look · <kbd>R</kbd> restart mission · <kbd>1</kbd>–<kbd>5</kbd> pick mission</div>
+<div id="sb"><i id="sf"></i></div>
+<div id="toast" class="p"></div>
+<div id="start" class="p"><h1>🏃 Rooftop Run</h1><p>Five missions across an open low-poly city. Sprint, double jump and climb walls. Keyboard and mouse.</p><b>Click or press Enter to start</b></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id),V=(x,y,z)=>new THREE.Vector3(x,y,z);
+let seed=11;const rnd=()=>(seed=seed*16807%2147483647)/2147483647;
+const mat=(c,o)=>new THREE.MeshStandardMaterial(Object.assign({color:c,flatShading:true,roughness:1,metalness:0},o));
+const scene=new THREE.Scene();scene.background=new THREE.Color(0xcfe8ff);scene.fog=new THREE.Fog(0xcfe8ff,80,320);
+const cam=new THREE.PerspectiveCamera(68,1,.1,600);
+const ren=new THREE.WebGLRenderer({antialias:true});ren.setPixelRatio(Math.min(devicePixelRatio,2));ren.shadowMap.enabled=true;document.body.prepend(ren.domElement);
+const rs=()=>{ren.setSize(innerWidth,innerHeight,false);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix()};addEventListener('resize',rs);rs();
+scene.add(new THREE.HemisphereLight(0xffffff,0x8a97a8,.95));
+const sun=new THREE.DirectionalLight(0xfff0d8,.85);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.bias=-.0006;
+Object.assign(sun.shadow.camera,{left:-50,right:50,top:50,bottom:-50,near:1,far:220});scene.add(sun,sun.target);
+const gr=new THREE.Mesh(new THREE.PlaneGeometry(1200,1200),mat(0x9aa5b1));gr.rotation.x=-Math.PI/2;gr.receiveShadow=true;scene.add(gr);
+
+/* ---------- world ---------- */
+const boxes=[];
+const solid=(x,y,z,w,h,d)=>boxes.push({x0:x-w/2,x1:x+w/2,y0:y,y1:y+h,z0:z-d/2,z1:z+d/2});
+function blk(x,y,z,w,h,d,m,s){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);o.position.set(x,y+h/2,z);o.castShadow=o.receiveShadow=true;scene.add(o);if(s)solid(x,y,z,w,h,d)}
+function hit(x,y,z,r,h){for(const b of boxes)if(x+r>b.x0&&x-r<b.x1&&y+h>b.y0&&y<b.y1&&z+r>b.z0&&z-r<b.z1)return b}
+const N=9,C=22,OFF=(N-1)/2,LIM=N*C/2+12,roofs={};let TW;
+const walls=[0xf6f8fa,0xeceff3,0xe2e7ec,0xf8f2ea].map(c=>mat(c)),accs=[0xff2d3d,0x2fb8a6,0xffb02e,0x3b7cff].map(c=>mat(c));
+const grey=mat(0xc9d1d9),band=mat(0xa9b6c4),red=mat(0xff2d3d,{emissive:0x4a0c12});
+for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+ const x=(i-OFF)*C+(rnd()-.5)*2,z=(j-OFF)*C+(rnd()-.5)*2,w=10+rnd()*4,d=10+rnd()*4;
+ let h=Math.max(5,8+3.2*(Math.sin(i*.8+1)+Math.cos(j*.7)+.5*Math.sin(i+j))+(rnd()-.5)*3);
+ if(i==4&&j==4){h=38;TW={x,z,w}}
+ h=Math.round(h*2)/2;
+ blk(x,0,z,w,h-.5,d,walls[rnd()*4|0]);
+ blk(x,h*.55,z,w+.1,1.2,d+.1,band);
+ blk(x,h-.5,z,w+.5,.5,d+.5,rnd()<.5?grey:accs[rnd()*4|0]);
+ solid(x,0,z,w+.5,h,d+.5);
+ if(rnd()<.5)blk(x,h,z+d/2-.4,w,.06,.6,red);
+ roofs[i+','+j]=V(x,h,z);
+}
+for(let k=0;k<16;k++){const a=k*.5+.5,r=TW.w/2+2.9;blk(TW.x+Math.cos(a)*r,2.4*k+1.2,TW.z+Math.sin(a)*r,3.2,.6,3.2,red,1)}
+
+/* ---------- runner ---------- */
+const hero=new THREE.Group(),legs=[],arms=[],tail=[];hero.rotation.order='YXZ';hero.scale.setScalar(.8);scene.add(hero);
+const skin=mat(0xf3d3b8),jkt=mat(0xe9b44c),shirt=mat(0x4a6fa5),hem=mat(0x8a6a2a),pants=mat(0x5a4636),shoe=mat(0x2a2a30),hair=mat(0xc99a5e),dk=mat(0x1d1d24),pink=mat(0xff9fb0),eye=mat(0x7fe9ff,{emissive:0x7fe9ff,emissiveIntensity:.9});
+const part=(g,m,x,y,z,p=hero)=>{const o=new THREE.Mesh(g,m);o.position.set(x,y,z);o.castShadow=true;p.add(o);return o};
+const B=(a,b,c)=>new THREE.BoxGeometry(a,b,c);
+part(B(.46,.42,.28),jkt,0,.66,0);part(B(.16,.36,.02),shirt,0,.66,.145);part(B(.48,.07,.3),hem,0,.5,0);
+part(B(.5,.42,.44),skin,0,1.1,0);part(B(.53,.12,.47),hair,0,1.3,0);part(B(.53,.1,.1),hair,0,1.23,.2);part(B(.53,.3,.1),hair,0,1.12,-.2);
+[-1,1].forEach(s=>{part(new THREE.ConeGeometry(.12,.26,4),hair,s*.16,1.46,0).rotation.z=-s*.15;
+ part(B(.12,.16,.03),eye,s*.12,1.1,.225);part(B(.03,.12,.02),dk,s*.12,1.1,.243)});
+part(B(.04,.03,.02),pink,0,.99,.225);
+[-1,1].forEach(s=>{
+ let g=new THREE.Group();g.position.set(s*.1,.45,0);part(B(.15,.45,.17),pants,0,-.225,0,g);part(B(.17,.09,.26),shoe,0,-.41,.04,g);hero.add(g);legs.push(g);
+ g=new THREE.Group();g.position.set(s*.3,.84,0);part(B(.15,.4,.16),jkt,0,-.2,0,g);part(B(.1,.1,.1),skin,0,-.43,0,g);hero.add(g);arms.push(g)});
+{let par=hero;for(let k=0;k<3;k++){const g=new THREE.Group();g.position.set(0,k?0:.5,k?-.27:-.16);par.add(g);part(B(.09,.09,.3),hair,0,0,-.13,g);tail.push(g);par=g}}
+
+/* ---------- missions ---------- */
+const roof=(i,j)=>roofs[i+','+j].clone(),gnd=(i,j)=>V((i+.5-OFF)*C,0,(j+.5-OFF)*C);
+const MS=[
+{n:'Rooftop Warm-Up',t:'Warm up: follow the red beacons across the rooftops.',s:roof(1,1),pts:[roof(2,1),roof(2,2),roof(3,2),roof(3,3)]},
+{n:'Cash Grab',t:'Snatch every cash stack circling the tower before time runs out.',s:roof(3,3),any:1,col:0x3ddc84,time:75,pts:[roof(2,3),roof(1,4),roof(2,5),roof(3,6),roof(5,6),roof(6,5),roof(6,3),roof(5,2)]},
+{n:'Courier Run',t:'Grab the package, then deliver it across town.',s:roof(1,7),time:90,col:[0xffc83a,0xff2d3d],lab:['Pick up the package','Deliver to the client'],pts:[roof(0,1),roof(8,7)]},
+{n:'Street Sprint',t:'Sprint through every gate at street level. Keep your speed!',s:gnd(0,0),time:50,pts:[gnd(0,3),gnd(3,3),gnd(3,6),gnd(6,6),gnd(6,2),gnd(7,0)]},
+{n:'Summit',t:'Reach the top of the central tower: red steps or the walls, your call.',s:gnd(4,4),time:80,pts:[roof(4,4)]}
+];
+let yaw=.6,pitch=.4,camD=8,tt=0,mi=0,nxt=0,got=0,tl=0,wait=0,res='',free=0,mk=[],started=0;
+const P={p:V(0,0,0),v:V(0,0,0),g:0,air:1,coy:0,stam:1,climb:0,wall:0,head:0,ph:0};
+P.p.copy(MS[0].s);
+function mkr(c){const g=new THREE.Group();
+ g.add(new THREE.Mesh(new THREE.OctahedronGeometry(.8),mat(c,{emissive:c,emissiveIntensity:.6})));
+ const b=new THREE.Mesh(new THREE.CylinderGeometry(.35,.35,60,8,1,true),new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:.28,depthWrite:false,side:THREE.DoubleSide}));b.position.y=30;g.add(b);return g}
+function say(t,ms=2000){const e=$('toast');e.textContent=t;e.style.opacity=1;clearTimeout(say.t);say.t=setTimeout(()=>e.style.opacity=0,ms)}
+function hud(){const m=MS[mi],n=m.pts.length;$('mn').textContent=`Mission ${mi+1}/${MS.length} · ${m.n}`;$('mt').textContent=m.t;
+ $('mo').textContent=m.any?`💵 Cash ${got}/${n}`:`➜ ${(m.lab&&m.lab[Math.min(nxt,n-1)])||'Reach the beacon'} (${Math.min(nxt+1,n)}/${n})`;
+ $('tm').textContent=m.time?`⏱ ${Math.max(0,tl).toFixed(1)}s`:'No time limit'}
+function begin(i){mi=i;free=0;const m=MS[i];nxt=0;got=0;tl=m.time||0;wait=0;res='';
+ mk.forEach(o=>scene.remove(o));
+ mk=m.pts.map((q,k)=>{const o=mkr(Array.isArray(m.col)?m.col[k]:(m.col||0xff2d3d));o.position.copy(q).y+=1.6;o.userData.ok=1;scene.add(o);return o});
+ P.p.copy(m.s);P.p.y+=.05;P.v.set(0,0,0);P.stam=1;P.climb=0;say(m.n,2200);hud()}
+function finish(){free=1;mk.forEach(o=>scene.remove(o));mk=[];say('🏆 All missions complete. The rooftops are yours!',6000);
+ $('mn').textContent='Free roam';$('mt').textContent='Press 1–5 to replay any mission.';$('mo').textContent='';$('tm').textContent='';$('nav').style.display='none'}
+function mission(dt){
+ if(free)return;const m=MS[mi];
+ mk.forEach((o,k)=>{o.rotation.y+=dt*2.5;o.visible=!!o.userData.ok&&(!!m.any||k===nxt)});
+ if(wait>0){wait-=dt;if(wait<=0){if(res==='win'){mi+1<MS.length?begin(mi+1):finish()}else begin(mi)}return}
+ if(m.time){tl-=dt;if(tl<=0){say('Time’s up! Restarting…',2200);res='lose';wait=2.5;return}}
+ const c=P.p.clone();c.y+=.5;
+ mk.forEach(o=>{if(o.visible&&o.position.distanceToSquared(c)<7.8){o.userData.ok=0;got++;if(!m.any)nxt++;say(m.any?`💵 ${got}/${m.pts.length}`:'Checkpoint!',900)}});
+ if(got>=m.pts.length){say('Mission complete! 🎉',2800);res='win';wait=3.2}
+ hud();
+ let tg=null,b=1e9;mk.forEach(o=>{if(o.visible){const d=o.position.distanceToSquared(P.p);if(d<b){b=d;tg=o}}});
+ $('nav').style.display=tg?'':'none';
+ if(tg){const dx=tg.position.x-P.p.x,dz=tg.position.z-P.p.z,fx=-Math.sin(yaw),fz=-Math.cos(yaw),a=Math.atan2(-dx*fz+dz*fx,dx*fx+dz*fz),dy=tg.position.y-1.6-P.p.y;
+  $('ar').style.transform=`rotate(${a}rad)`;$('di').textContent=Math.round(Math.hypot(dx,dz))+' m '+(dy>3?'▲':dy<-3?'▼':'')}
+}
+
+/* ---------- input ---------- */
+const K={};let jp=0,drag=0;
+function go(){if(started)return;started=1;document.body.classList.add('on');$('start').style.display='none';begin(0)}
+addEventListener('keydown',e=>{K[e.code]=1;if(/Space|Arrow/.test(e.code))e.preventDefault();
+ if(e.code==='Space'&&!e.repeat)jp=1;
+ if(e.code==='Enter')go();
+ if(started){if(e.code==='KeyR')begin(mi);const n=+e.key;if(n>=1&&n<=MS.length)begin(n-1)}});
+addEventListener('keyup',e=>K[e.code]=0);addEventListener('blur',()=>{for(const k in K)K[k]=0});
+addEventListener('mousedown',()=>{go();drag=1;try{const r=ren.domElement.requestPointerLock?.();r&&r.catch&&r.catch(()=>{})}catch(_){}});
+addEventListener('mouseup',()=>drag=0);
+addEventListener('mousemove',e=>{if(drag||document.pointerLockElement){yaw-=e.movementX*.004;pitch=Math.min(1.3,Math.max(-.25,pitch+e.movementY*.004))}});
+
+/* ---------- physics ---------- */
+function step(dt){
+ tt+=dt;const p=P.p,v=P.v;
+ const f=(K.KeyW||K.ArrowUp?1:0)-(K.KeyS||K.ArrowDown?1:0),r=(K.KeyD?1:0)-(K.KeyA?1:0);
+ if(K.ArrowLeft)yaw+=dt*2.2;if(K.ArrowRight)yaw-=dt*2.2;
+ let dx=-Math.sin(yaw)*f+Math.cos(yaw)*r,dz=-Math.cos(yaw)*f-Math.sin(yaw)*r;const l=Math.hypot(dx,dz);if(l>1){dx/=l;dz/=l}
+ if(l>.1)P.head=Math.atan2(dx,dz);
+ const sp=K.ShiftLeft||K.ShiftRight?15:9;
+ if(P.g){const k=1-Math.exp(-10*dt);v.x+=(dx*sp-v.x)*k;v.z+=(dz*sp-v.z)*k}
+ else if(l>.1){v.x+=dx*24*dt;v.z+=dz*24*dt;const s=Math.hypot(v.x,v.z);if(s>15){v.x*=15/s;v.z*=15/s}}
+ P.coy=P.g?.12:P.coy-dt;
+ if(jp){jp=0;if(P.coy>0){v.y=11;P.coy=0}else if(P.air>0&&!P.climb){v.y=10;P.air--}}
+ P.climb=K.Space&&P.wall&&!P.g&&P.stam>0?1:0;
+ v.y-=30*dt;if(P.climb){v.y=Math.max(v.y,6);P.stam-=dt*.3}
+ P.wall=0;
+ p.x+=v.x*dt;let b=hit(p.x,p.y,p.z,.4,1);if(b){p.x=v.x>0?b.x0-.401:b.x1+.401;v.x=0;P.wall=1}
+ p.z+=v.z*dt;b=hit(p.x,p.y,p.z,.4,1);if(b){p.z=v.z>0?b.z0-.401:b.z1+.401;v.z=0;P.wall=1}
+ p.y+=v.y*dt;P.g=0;b=hit(p.x,p.y,p.z,.4,1);
+ if(b){if(v.y<0){p.y=b.y1;P.g=1}else p.y=b.y0-1.001;v.y=0}
+ if(p.y<=0){p.y=0;if(v.y<0)v.y=0;P.g=1}
+ if(P.g){P.air=1;P.stam=Math.min(1,P.stam+dt*.9)}
+ p.x=Math.max(-LIM,Math.min(LIM,p.x));p.z=Math.max(-LIM,Math.min(LIM,p.z));
+ $('sf').style.width=Math.max(0,P.stam)*100+'%';
+}
+function animate(dt){
+ const sp=Math.hypot(P.v.x,P.v.z);hero.position.copy(P.p);
+ const d=((P.head-hero.rotation.y)+Math.PI*3)%(Math.PI*2)-Math.PI;hero.rotation.y=(hero.rotation.y+d*Math.min(1,dt*14))%(Math.PI*2);
+ P.ph+=sp*dt*.9;const a=Math.min(sp/9,1.5)*.8,s=Math.sin(P.ph);
+ legs.forEach((l,k)=>{l.rotation.x=P.climb?Math.sin(tt*10+k*Math.PI)*.8:P.g?s*a*(k?-1:1):(k?.9:-.5)});
+ arms.forEach((m,k)=>{m.rotation.x=P.climb?Math.sin(tt*10+k*Math.PI+1.6)*.7-2.6:P.g?s*a*(k?1:-1):-2.4+k*.4;m.rotation.z=(k?1:-1)*(P.g?.05:.35)});
+ hero.rotation.x+=((P.climb?.2:P.g?Math.min(sp/15,1)*.25:.12)-hero.rotation.x)*Math.min(1,dt*10);
+ tail.forEach((g,k)=>{g.rotation.x=.35+Math.sin(tt*4+k*.8)*.2;g.rotation.y=Math.sin(tt*3+k*.7)*.3});
+ if(P.g)hero.position.y+=Math.abs(s)*.05;
+}
+function cams(dt){
+ const p=P.p,cp=Math.cos(pitch),dx=Math.sin(yaw)*cp,dy=Math.sin(pitch),dz=Math.cos(yaw)*cp,ty=p.y+1.2;
+ let d=8;while(d>1.2&&hit(p.x+dx*d,Math.max(.3,ty+dy*d)-.3,p.z+dz*d,.4,.6))d-=.4;
+ camD=d<camD?d:camD+(d-camD)*Math.min(1,dt*3);
+ cam.position.set(p.x+dx*camD,Math.max(.4,ty+dy*camD),p.z+dz*camD);cam.lookAt(p.x,ty,p.z);
+ cam.fov+=(66+Math.hypot(P.v.x,P.v.z)*1.1-cam.fov)*Math.min(1,dt*4);cam.updateProjectionMatrix();
+ sun.position.set(p.x+40,p.y+70,p.z+25);sun.target.position.copy(p);
+}
+let last=performance.now();
+(function loop(now){requestAnimationFrame(loop);const dt=Math.min(.05,(now-last)/1000);last=now;
+ if(started){step(dt);mission(dt)}else{yaw+=dt*.12;tt+=dt}
+ animate(dt);cams(dt);ren.render(scene,cam)})(last);
+</script></body></html>
